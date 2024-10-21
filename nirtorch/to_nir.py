@@ -44,23 +44,31 @@ def extract_nir_graph(
         # If the model has submodules, ignore the top level module
         model_name = None
 
+    # print(f"\n\n {'+'* 100}")
+    # print("in extract_nir_graph")
+
     # Extract a torch graph given the model
-    torch_graph = extract_torch_graph(
-        model, sample_data=sample_data, model_name=model_name, model_args=model_fwd_args
-    ).ignore_tensors()
+    torch_graph = extract_torch_graph(model, sample_data=sample_data, model_name=model_name, model_args=model_fwd_args)
+
+    # print("\n***>\tafter extract_torch_graph")
+    torch_graph = torch_graph.ignore_tensors()
+
+    # print(torch_graph)
 
     if ignore_submodules_of is not None:
         torch_graph = torch_graph.ignore_submodules_of(ignore_submodules_of)
 
+    # print("\n\nin extract_nir_graph\tafter ignore_submodules_of")
+    # print(torch_graph)
+
     # Convert the nodes and get indices
-    nir_edges = []
     input_shape = np.array(sample_data.shape)
     if ignore_dims:
         nir_nodes = {"input": nir.Input(np.delete(input_shape, ignore_dims))}
     else:
         nir_nodes = {"input": nir.Input(input_shape)}
-    nir_edges = []
 
+    nir_edges = []
     subgraph_keys = []
     subgraph_input_nodekeys = []
     subgraph_output_nodekeys = []
@@ -68,6 +76,7 @@ def extract_nir_graph(
     for indx, node in enumerate(torch_graph.node_list):
         # Convert the node type to NIR subgraph
         mapped_node = model_map(node.elem)
+        # print(f"{indx} node: {node.name if node is not None else 'None'} mapped_node {type(mapped_node)}")
 
         if isinstance(mapped_node, nir.NIRGraph):
             subgraph_keys.append(node.name)
@@ -79,9 +88,9 @@ def extract_nir_graph(
                 subgraph_node_key = f"{node.name}.{k}"
 
                 # keep track of subgraph input and outputs (to remove later)
-                if isinstance(v, nir.Input):
+                if isinstance(v, nir.ir.graph.Input):
                     subgraph_input_nodekeys.append(subgraph_node_key)
-                elif isinstance(v, nir.Output):
+                elif isinstance(v, nir.ir.graph.Output):
                     subgraph_output_nodekeys.append(subgraph_node_key)
 
                 if isinstance(v, nir.NIRNode):
@@ -101,8 +110,17 @@ def extract_nir_graph(
             for k1, k2 in zip(keys[:-1], keys[1:]):
                 nir_edges.append((k1, k2))
 
+    # print("in extract_nir_graph\tafter node conversion")
+    # for k, v in nir_nodes.items():
+    #     print(f"{k}: {type(v)}")
+
+    # print("in extract_nir_graph\tafter edge conversion")
+    # for e in nir_edges:
+    #     print(f"{e}")
+
     # Get all the edges
     for node in torch_graph.node_list:
+        # print(node.name, node.outgoing_nodes)
         for destination, shape in node.outgoing_nodes.items():
             nir_edges.append((node.name, destination.name))
 
@@ -110,12 +128,11 @@ def extract_nir_graph(
             out_name = "output"
             # Try to find shape of input to the Output node
             if ignore_dims:
-                out_shape = np.delete(
-                    torch_graph.module_output_types[node.elem], ignore_dims
-                )
+                out_shape = np.delete(torch_graph.module_output_types[node.elem], ignore_dims)
             else:
+                # print(list(torch_graph.module_output_types.keys()))
                 out_shape = torch_graph.module_output_types[node.elem]
-            output_node = nir.Output(out_shape)
+            output_node = nir.ir.graph.Output(out_shape)
             nir_nodes[out_name] = output_node
             nir_edges.append((node.name, out_name))
 
